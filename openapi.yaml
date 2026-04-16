@@ -1,67 +1,17 @@
-openapi: 3.0.0
-info:
-  title: GPT Betting API
-  version: 2.0.0
-
-servers:
-  - url: https://gpt-betting-api.vercel.app
-
-paths:
-  /api/health:
+  /api/odds-events:
     get:
-      operationId: getHealth
-      summary: Verifica se a API está online
-      responses:
-        '200':
-          description: API online
-
-  /api/odds:
-    get:
-      operationId: getOdds
-      summary: Retorna odds reais do confronto
+      operationId: getOddsEvents
+      summary: Lista jogos disponíveis nas odds
       parameters:
-        - name: home_team
-          in: query
-          required: true
-          schema:
-            type: string
-        - name: away_team
-          in: query
-          required: true
-          schema:
-            type: string
         - name: sport
           in: query
           required: false
           schema:
             type: string
-            default: soccer_brazil_campeonato
+            default: soccer
       responses:
         '200':
-          description: Odds do jogo
-          content:
-            application/json:
-              schema:
-                type: object
-
-  /api/match-overview:
-    get:
-      operationId: getMatchOverview
-      summary: Retorna forma recente e H2H reais
-      parameters:
-        - name: home_team
-          in: query
-          required: true
-          schema:
-            type: string
-        - name: away_team
-          in: query
-          required: true
-          schema:
-            type: string
-      responses:
-        '200':
-          description: Dados do confronto
+          description: Lista de jogos disponíveis
           content:
             application/json:
               schema:
