@@ -6,10 +6,36 @@ function normalizeText(value = "") {
     .trim();
 }
 
-function includesTeamName(source = "", target = "") {
-  const a = normalizeText(source);
-  const b = normalizeText(target);
-  return a.includes(b) || b.includes(a);
+function tokenize(value = "") {
+  return normalizeText(value)
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function teamMatches(apiName = "", requestedName = "") {
+  const apiTokens = tokenize(apiName);
+  const reqTokens = tokenize(requestedName);
+
+  if (!apiTokens.length || !reqTokens.length) return false;
+
+  const overlap = reqTokens.filter((t) => apiTokens.includes(t));
+  return overlap.length >= Math.min(1, reqTokens.length);
+}
+
+async function fetchOddsForSport(sport: string, apiKey: string) {
+  const url =
+    `https://api.the-odds-api.com/v4/sports/${sport}/odds/` +
+    `?apiKey=${apiKey}&regions=eu&markets=h2h,spreads&oddsFormat=decimal`;
+
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Odds API ${response.status}: ${text}`);
+  }
+
+  return response.json();
 }
 
 export default async function handler(req, res) {
@@ -29,40 +55,47 @@ export default async function handler(req, res) {
   }
 
   try {
-    const url =
-      `https://api.the-odds-api.com/v4/sports/${sport}/odds/` +
-      `?apiKey=${apiKey}&regions=eu&markets=h2h,spreads&oddsFormat=decimal`;
+    const sportsToTry = [sport, "soccer"].filter(
+      (value, index, arr) => arr.indexOf(value) === index
+    );
 
-    const response = await fetch(url);
+    let matchedGame = null;
+    let matchedSport = null;
+    let lastGames = [];
 
-    if (!response.ok) {
-      const text = await response.text();
-      return res.status(response.status).json({
-        error: "Erro ao buscar odds externas",
-        details: text
+    for (const currentSport of sportsToTry) {
+      const games = await fetchOddsForSport(currentSport, apiKey);
+      lastGames = Array.isArray(games) ? games : [];
+
+      matchedGame = lastGames.find((g) => {
+        const homeOk = teamMatches(g.home_team, String(home_team));
+        const awayOk = teamMatches(g.away_team, String(away_team));
+        return homeOk && awayOk;
       });
+
+      if (matchedGame) {
+        matchedSport = currentSport;
+        break;
+      }
     }
 
-    const data = await response.json();
-
-    const game = Array.isArray(data)
-      ? data.find(
-          (g) =>
-            includesTeamName(g.home_team, home_team) &&
-            includesTeamName(g.away_team, away_team)
-        )
-      : null;
-
-    if (!game) {
+    if (!matchedGame) {
       return res.status(404).json({
         error: "Jogo não encontrado nas odds",
-        searched: { home_team, away_team, sport }
+        searched: { home_team, away_team, sport },
+        sample_games: lastGames.slice(0, 10).map((g) => ({
+          home_team: g.home_team,
+          away_team: g.away_team,
+          sport_key: g.sport_key,
+          commence_time: g.commence_time
+        }))
       });
     }
 
-    const bookmaker = Array.isArray(game.bookmakers) && game.bookmakers.length > 0
-      ? game.bookmakers[0]
-      : null;
+    const bookmaker =
+      Array.isArray(matchedGame.bookmakers) && matchedGame.bookmakers.length > 0
+        ? matchedGame.bookmakers[0]
+        : null;
 
     if (!bookmaker) {
       return res.status(404).json({
@@ -74,10 +107,10 @@ export default async function handler(req, res) {
     const spreadsMarket = bookmaker.markets?.find((m) => m.key === "spreads");
 
     return res.status(200).json({
-      home_team: game.home_team,
-      away_team: game.away_team,
-      sport_key: game.sport_key,
-      commence_time: game.commence_time,
+      home_team: matchedGame.home_team,
+      away_team: matchedGame.away_team,
+      sport_key: matchedSport,
+      commence_time: matchedGame.commence_time,
       bookmaker: bookmaker.title,
       h2h: h2hMarket?.outcomes || [],
       spreads: spreadsMarket?.outcomes || [],
